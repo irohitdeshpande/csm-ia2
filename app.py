@@ -2,19 +2,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 import simpy
 import time
-from typing import Dict, List, Tuple
 
 # Set page configuration
-st.set_page_config(
-    page_title="Newsstand Simulation", 
-    layout="wide", 
-    initial_sidebar_state="expanded",
-    menu_items={
-        'About': "Monte Carlo & Discrete-Event Simulation for Newsstand Inventory Optimization"
-    }
-)
+st.set_page_config(page_title="Newsstand Simulation", layout="wide", initial_sidebar_state="expanded")
 
 # Title
 st.title("📰 Newsstand Inventory Simulation")
@@ -26,10 +20,10 @@ st.sidebar.header("⚙️ Simulation Parameters")
 
 # Cost parameters
 st.sidebar.subheader("💰 Cost Parameters")
-# Values in paise (100 paise = 1 rupee)
-cost_price = st.sidebar.number_input("Cost Price per Newspaper (₹)", min_value=0.1, max_value=10.0, value=3.30, step=0.10, key="cost_price_input")
-selling_price = st.sidebar.number_input("Selling Price per Newspaper (₹)", min_value=0.1, max_value=20.0, value=5.00, step=0.10, key="selling_price_input")
-scrap_price = st.sidebar.number_input("Scrap Price per Newspaper (₹)", min_value=0.0, max_value=5.0, value=0.50, step=0.10, key="scrap_price_input")
+# Using Rupees (₹) and paise for currency
+cost_price = st.sidebar.number_input("Cost Price per Newspaper (₹)", min_value=0.1, max_value=100.0, value=3.30, step=0.01, key="cost_price_input")
+selling_price = st.sidebar.number_input("Selling Price per Newspaper (₹)", min_value=0.1, max_value=200.0, value=5.00, step=0.01, key="selling_price_input")
+scrap_price = st.sidebar.number_input("Scrap Price per Newspaper (₹)", min_value=0.0, max_value=50.0, value=0.50, step=0.01, key="scrap_price_input")
 
 # Bundle parameters
 st.sidebar.subheader("📦 Bundle Parameters")
@@ -50,61 +44,71 @@ num_papers = st.sidebar.slider("Number of Papers to Purchase Daily",
 # Day type probabilities
 st.sidebar.subheader("📅 Day Type Probabilities")
 
-# Initialize session state for probabilities if not exists
-if 'prob_good' not in st.session_state:
-    st.session_state.prob_good = 0.35
-if 'prob_fair' not in st.session_state:
-    st.session_state.prob_fair = 0.45
-if 'prob_poor' not in st.session_state:
-    st.session_state.prob_poor = 0.20
-if 'last_changed' not in st.session_state:
-    st.session_state.last_changed = None
+# --- Auto-adjusting probability sliders using session state ---
+if 'prob_anchor' not in st.session_state:
+    st.session_state['prob_anchor'] = []  # keep last two changed identifiers
+if 'prob_adjust_lock' not in st.session_state:
+    st.session_state['prob_adjust_lock'] = False
 
-# Create sliders with session state values
-prob_good_input = st.sidebar.slider("Probability of Good Day", min_value=0.0, max_value=1.0, 
-                                     value=st.session_state.prob_good, step=0.01, key="prob_good_slider")
-prob_fair_input = st.sidebar.slider("Probability of Fair Day", min_value=0.0, max_value=1.0, 
-                                     value=st.session_state.prob_fair, step=0.01, key="prob_fair_slider")
-prob_poor_input = st.sidebar.slider("Probability of Poor Day", min_value=0.0, max_value=1.0, 
-                                     value=st.session_state.prob_poor, step=0.01, key="prob_poor_slider")
+def _prob_changed(which: str):
+    """Track last two sliders changed; when two are set, adjust the third to keep sum≈1.0."""
+    if st.session_state.get('prob_adjust_lock'):
+        return
+    anchor = list(st.session_state.get('prob_anchor', []))
+    if which in anchor:
+        anchor.remove(which)
+    anchor.append(which)
+    # keep only last two
+    anchor = anchor[-2:]
+    st.session_state['prob_anchor'] = anchor
 
-# Detect which slider changed and auto-adjust the third one
-if prob_good_input != st.session_state.prob_good:
-    st.session_state.last_changed = 'good'
-    st.session_state.prob_good = prob_good_input
-    # Adjust poor to maintain sum = 1.0
-    remaining = 1.0 - prob_good_input - prob_fair_input
-    st.session_state.prob_poor = max(0.0, min(1.0, remaining))
-    st.rerun()
-elif prob_fair_input != st.session_state.prob_fair:
-    st.session_state.last_changed = 'fair'
-    st.session_state.prob_fair = prob_fair_input
-    # Adjust poor to maintain sum = 1.0
-    remaining = 1.0 - prob_good_input - prob_fair_input
-    st.session_state.prob_poor = max(0.0, min(1.0, remaining))
-    st.rerun()
-elif prob_poor_input != st.session_state.prob_poor:
-    st.session_state.last_changed = 'poor'
-    st.session_state.prob_poor = prob_poor_input
-    # Adjust fair to maintain sum = 1.0
-    remaining = 1.0 - prob_good_input - prob_poor_input
-    st.session_state.prob_fair = max(0.0, min(1.0, remaining))
-    st.rerun()
+    if len(anchor) == 2:
+        g = float(st.session_state.get('prob_good_slider', 0.35))
+        f = float(st.session_state.get('prob_fair_slider', 0.45))
+        p = float(st.session_state.get('prob_poor_slider', 0.20))
 
-# Use session state values
-prob_good = st.session_state.prob_good
-prob_fair = st.session_state.prob_fair
-prob_poor = st.session_state.prob_poor
+        missing = {'good', 'fair', 'poor'} - set(anchor)
+        if missing:
+            missing = missing.pop()
+            if missing == 'good':
+                target = max(0.0, min(1.0, 1.0 - f - p))
+                st.session_state['prob_adjust_lock'] = True
+                st.session_state['prob_good_slider'] = round(target, 2)
+                st.session_state['prob_adjust_lock'] = False
+            elif missing == 'fair':
+                target = max(0.0, min(1.0, 1.0 - g - p))
+                st.session_state['prob_adjust_lock'] = True
+                st.session_state['prob_fair_slider'] = round(target, 2)
+                st.session_state['prob_adjust_lock'] = False
+            else:  # missing == 'poor'
+                target = max(0.0, min(1.0, 1.0 - g - f))
+                st.session_state['prob_adjust_lock'] = True
+                st.session_state['prob_poor_slider'] = round(target, 2)
+                st.session_state['prob_adjust_lock'] = False
+            st.rerun()
 
-# Validate probabilities
+def _on_good():
+    _prob_changed('good')
+
+def _on_fair():
+    _prob_changed('fair')
+
+def _on_poor():
+    _prob_changed('poor')
+
+# Sliders with callbacks
+prob_good = st.sidebar.slider("Probability of Good Day", min_value=0.0, max_value=1.0, value=0.35, step=0.01, key="prob_good_slider", on_change=_on_good)
+prob_fair = st.sidebar.slider("Probability of Fair Day", min_value=0.0, max_value=1.0, value=0.45, step=0.01, key="prob_fair_slider", on_change=_on_fair)
+prob_poor = st.sidebar.slider("Probability of Poor Day", min_value=0.0, max_value=1.0, value=0.20, step=0.01, key="prob_poor_slider", on_change=_on_poor)
+
+# Display status about sum (no normalization side-effects)
 total_prob = prob_good + prob_fair + prob_poor
-if total_prob == 0:
-    st.sidebar.error("Total probability must be greater than 0! Using default equal probabilities.")
-    prob_good, prob_fair, prob_poor = 1/3, 1/3, 1/3
-elif np.isclose(total_prob, 1.0):
-    st.sidebar.success(f"✓ Probabilities valid: Good={prob_good:.2%}, Fair={prob_fair:.2%}, Poor={prob_poor:.2%}")
+if np.isclose(total_prob, 1.0, atol=0.01):
+    st.sidebar.info(f"Probabilities ≈ 1.0. Good={prob_good:.2f}, Fair={prob_fair:.2f}, Poor={prob_poor:.2f}")
+elif total_prob == 0:
+    st.sidebar.error("Total probability must be greater than 0!")
 else:
-    st.sidebar.info(f"📊 Current: Good={prob_good:.2%}, Fair={prob_fair:.2%}, Poor={prob_poor:.2%} (Total: {total_prob:.2%})")
+    st.sidebar.warning(f"Current sum = {total_prob:.2f}. Adjust any two sliders; the third will auto-update.")
 
 
 # Demand distribution parameters
@@ -117,94 +121,65 @@ st.sidebar.subheader("📊 Demand Distribution")
 # Good day demand (using ranges, not the image's specific table)
 good_day_min = st.sidebar.number_input("Good Day Min Demand", min_value=0, max_value=500, value=40, step=bundle_size, key="good_min_input")
 good_day_max = st.sidebar.number_input("Good Day Max Demand", min_value=0, max_value=500, value=100, step=bundle_size, key="good_max_input")
-
-# Validate Good day range
-if good_day_max < good_day_min:
-    st.sidebar.error(f"⚠️ Good Day Max ({good_day_max}) < Min ({good_day_min}). Swapping values.")
-    good_day_min, good_day_max = good_day_max, good_day_min
-
 # Fair day demand
 fair_day_min = st.sidebar.number_input("Fair Day Min Demand", min_value=0, max_value=500, value=30, step=bundle_size, key="fair_min_input")
 fair_day_max = st.sidebar.number_input("Fair Day Max Demand", min_value=0, max_value=500, value=80, step=bundle_size, key="fair_max_input")
-
-# Validate Fair day range
-if fair_day_max < fair_day_min:
-    st.sidebar.error(f"⚠️ Fair Day Max ({fair_day_max}) < Min ({fair_day_min}). Swapping values.")
-    fair_day_min, fair_day_max = fair_day_max, fair_day_min
-
 # Poor day demand
 poor_day_min = st.sidebar.number_input("Poor Day Min Demand", min_value=0, max_value=500, value=20, step=bundle_size, key="poor_min_input")
 poor_day_max = st.sidebar.number_input("Poor Day Max Demand", min_value=0, max_value=500, value=70, step=bundle_size, key="poor_max_input")
 
-# Validate Poor day range
-if poor_day_max < poor_day_min:
-    st.sidebar.error(f"⚠️ Poor Day Max ({poor_day_max}) < Min ({poor_day_min}). Swapping values.")
-    poor_day_min, poor_day_max = poor_day_max, poor_day_min
-
 # Simulation parameters
 st.sidebar.subheader("🔄 Simulation Settings")
 num_days = st.sidebar.slider("Number of Days to Simulate", min_value=1, max_value=365, value=365, step=1, key="num_days_slider")
-simulation_speed = st.sidebar.slider("Simulation Speed (seconds per day)", min_value=0.5, max_value=1.0, value=0.8, step=0.05, key="sim_speed_slider")
+simulation_speed = st.sidebar.slider("Simulation Speed (seconds per day)", min_value=0.0, max_value=1.0, value=0.01, step=0.01, key="sim_speed_slider")
 
 # Start simulation button
 run_simulation = st.sidebar.button("🚀 Run Simulation", type="primary", key="run_sim_button")
 
 
 class NewsstandSimulation:
-    """SimPy-based Newsstand Simulation using Monte Carlo for demand
+    """SimPy-based Newsstand Simulation using Monte Carlo for demand"""
     
-    This class implements a discrete-event simulation of a newsstand that:
-    1. Generates random day types (Good/Fair/Poor) based on probabilities
-    2. Generates demand for each day type using lookup tables
-    3. Calculates daily profit considering sales, costs, lost opportunities, and salvage
-    4. Tracks all simulation data for analysis
-    """
-    
-    def __init__(self, env: simpy.Environment, params: Dict):
+    def __init__(self, env, params):
         self.env = env
         self.params = params
-        self.simulation_data: List[Dict] = []
-        self.daily_results: Dict[int, Dict] = {}
+        self.simulation_data = []
+        self.daily_results = {}
         
         # Build the lookup tables for day type and demand
         self.day_type_lookup = self._build_day_type_lookup()
         self.demand_lookup = self._build_demand_lookup()
 
-    def _build_day_type_lookup(self) -> List[Dict]:
-        """Builds a lookup list for day type based on random digits (0-99).
-        
-        Returns:
-            List of dicts with 'type' and 'range' keys for day type mapping
-        """
+    def _build_day_type_lookup(self):
+        """Builds a lookup list for day type based on random digits."""
         lookup = []
         cumulative_prob = 0
         
         # Good Day
         start_range = 0
         cumulative_prob += self.params['prob_good']
-        end_range = max(0, int(cumulative_prob * 100) - 1)
+        end_range = int(cumulative_prob * 100) - 1
+        if end_range < start_range: end_range = start_range
         lookup.append({'type': 'Good', 'range': (start_range, end_range)})
         
         # Fair Day
         start_range = int(cumulative_prob * 100)
         cumulative_prob += self.params['prob_fair']
-        end_range = max(start_range, int(cumulative_prob * 100) - 1)
+        end_range = int(cumulative_prob * 100) - 1
+        if end_range < start_range: end_range = start_range
         lookup.append({'type': 'Fair', 'range': (start_range, end_range)})
         
-        # Poor Day (always ends at 99)
+        # Poor Day
         start_range = int(cumulative_prob * 100)
-        end_range = 99
+        end_range = 99 # Always ends at 99
         lookup.append({'type': 'Poor', 'range': (start_range, end_range)})
         
         return lookup
         
-    def _build_demand_lookup(self) -> Dict[str, List[Dict]]:
-        """Builds a nested lookup dict for demand based on day type and random digits.
-        
+    def _build_demand_lookup(self):
+        """
+        Builds a nested lookup dict for demand based on day type and random digits.
         Assumes a UNIFORM distribution among the possible demand levels.
-        
-        Returns:
-            Dict mapping day types to list of demand entries with ranges
         """
         lookup = {'Good': [], 'Fair': [], 'Poor': []}
         
@@ -215,11 +190,10 @@ class NewsstandSimulation:
         ]
         
         for day_type, min_d, max_d in day_types_config:
-            # Create list of possible demands
             demands = list(range(min_d, max_d + self.params['bundle_size'], self.params['bundle_size']))
             
-            # Handle edge case where min > max or empty range
-            if not demands or min_d > max_d:
+            # Handle case where min > max or no demands
+            if not demands:
                 lookup[day_type].append({'demand': min_d, 'range': (0, 99)})
                 continue
                 
@@ -230,54 +204,36 @@ class NewsstandSimulation:
                 start_range = int(cumulative_prob * 100)
                 cumulative_prob += prob_per_demand
                 
-                # Ensure the last range always goes to 99
-                end_range = 99 if i == len(demands) - 1 else max(start_range, int(cumulative_prob * 100) - 1)
+                # Ensure the last range goes to 99
+                if i == len(demands) - 1:
+                    end_range = 99
+                else:
+                    end_range = int(cumulative_prob * 100) - 1
+                
+                if end_range < start_range: end_range = start_range
                 
                 lookup[day_type].append({'demand': demand, 'range': (start_range, end_range)})
         
         return lookup
 
-    def determine_day_type(self, random_num: int) -> str:
-        """Determine day type from random number (0-99)
-        
-        Args:
-            random_num: Integer between 0-99
-            
-        Returns:
-            Day type string: 'Good', 'Fair', or 'Poor'
-        """
+    def determine_day_type(self, random_num):
+        """Determine day type from random number (0-99)"""
         for entry in self.day_type_lookup:
             start, end = entry['range']
             if start <= random_num <= end:
                 return entry['type']
-        return self.day_type_lookup[-1]['type']  # Fallback to last type
+        return self.day_type_lookup[-1]['type'] # Fallback to last type
     
-    def generate_demand(self, day_type: str, random_num: int) -> int:
-        """Generate demand based on day type and random number (0-99)
-        
-        Args:
-            day_type: 'Good', 'Fair', or 'Poor'
-            random_num: Integer between 0-99
-            
-        Returns:
-            Demand quantity as integer
-        """
+    def generate_demand(self, day_type, random_num):
+        """Generate demand based on day type and random number (0-99)"""
         for entry in self.demand_lookup[day_type]:
             start, end = entry['range']
             if start <= random_num <= end:
                 return entry['demand']
-        return self.demand_lookup[day_type][-1]['demand']  # Fallback to last demand
+        return self.demand_lookup[day_type][-1]['demand'] # Fallback to last demand
     
-    def calculate_profit(self, demand: int, papers_bought: int) -> Dict[str, float]:
-        """Calculate profit for a single day
-        
-        Args:
-            demand: Actual customer demand
-            papers_bought: Number of papers purchased
-            
-        Returns:
-            Dict containing all profit components
-        """
+    def calculate_profit(self, demand, papers_bought):
+        """Calculate profit for a single day"""
         papers_sold = min(demand, papers_bought)
         papers_unsold = max(0, papers_bought - demand)
         excess_demand = max(0, demand - papers_bought)
@@ -289,7 +245,8 @@ class NewsstandSimulation:
         # Lost profit is the opportunity cost of unmet demand
         lost_profit = excess_demand * (self.params['selling_price'] - self.params['cost_price'])
         
-        # PROFIT FORMULA: Revenue - Cost - Lost Profit + Salvage
+        # *** CORRECTED PROFIT FORMULA (as per user image) ***
+        # Profit = Revenue - Cost - Lost Profit + Salvage
         daily_profit = revenue_from_sales - cost - lost_profit + salvage
         
         return {
@@ -317,7 +274,8 @@ class NewsstandSimulation:
             # Determine day type
             day_type = self.determine_day_type(random_day_type)
             
-            # Generate demand for this day type using the random_demand digit
+            # *** CORRECTED DEMAND GENERATION ***
+            # Generate demand for this day type USING the random_demand digit
             demand = self.generate_demand(day_type, random_demand)
             
             # Calculate profit
@@ -353,23 +311,16 @@ class NewsstandSimulation:
 
 
 # Create cumulative probability table for DAY TYPE
-def create_cumulative_prob_table(prob_good: float, prob_fair: float, prob_poor: float) -> pd.DataFrame:
-    """Create cumulative probability table for random digit assignment
+def create_cumulative_prob_table(prob_good, prob_fair, prob_poor):
+    """Create cumulative probability table for random digit assignment"""
     
-    Args:
-        prob_good: Probability of good day
-        prob_fair: Probability of fair day
-        prob_poor: Probability of poor day
-        
-    Returns:
-        DataFrame with day type probability mappings
-    """
     day_types = []
     cumulative = 0
     
     # Good
     start = 0
-    end = max(0, int(prob_good * 100) - 1)
+    end = int(prob_good * 100) - 1
+    if end < start: end = start
     day_types.append({
         'Day Type': 'Good',
         'Probability': prob_good,
@@ -380,7 +331,8 @@ def create_cumulative_prob_table(prob_good: float, prob_fair: float, prob_poor: 
     
     # Fair
     start = int(cumulative * 100)
-    end = max(start, int((cumulative + prob_fair) * 100) - 1)
+    end = int((cumulative + prob_fair) * 100) - 1
+    if end < start: end = start
     day_types.append({
         'Day Type': 'Fair',
         'Probability': prob_fair,
@@ -402,26 +354,11 @@ def create_cumulative_prob_table(prob_good: float, prob_fair: float, prob_poor: 
     return pd.DataFrame(day_types)
 
 # Create cumulative probability table for DEMAND
-def create_demand_prob_table(min_d: int, max_d: int, bundle_size: int) -> pd.DataFrame:
-    """Creates the demand probability table for a single day type.
-    
-    Args:
-        min_d: Minimum demand
-        max_d: Maximum demand
-        bundle_size: Size of each bundle
-        
-    Returns:
-        DataFrame with demand probability mappings
-    """
+def create_demand_prob_table(min_d, max_d, bundle_size):
+    """Creates the demand probability table for a single day type."""
     demand_data = []
-    
-    # Swap if needed
-    if max_d < min_d:
-        min_d, max_d = max_d, min_d
-    
     demands = list(range(min_d, max_d + bundle_size, bundle_size))
     
-    # Handle edge cases
     if not demands:
         demand_data.append({
             'Demand': min_d,
@@ -438,8 +375,12 @@ def create_demand_prob_table(min_d: int, max_d: int, bundle_size: int) -> pd.Dat
         start_range = int(cumulative_prob * 100)
         cumulative_prob += prob_per_demand
         
-        # Last range always goes to 99
-        end_range = 99 if i == len(demands) - 1 else max(start_range, int(cumulative_prob * 100) - 1)
+        if i == len(demands) - 1:
+            end_range = 99
+        else:
+            end_range = int(cumulative_prob * 100) - 1
+            
+        if end_range < start_range: end_range = start_range
         
         demand_data.append({
             'Demand': demand,
@@ -451,22 +392,9 @@ def create_demand_prob_table(min_d: int, max_d: int, bundle_size: int) -> pd.Dat
     return pd.DataFrame(demand_data)
 
 
-# Optimization profit calculation
-def calculate_profit_for_quantity(df_simulated: pd.DataFrame, test_qty: int, 
-                                  cost_price: float, selling_price: float, 
-                                  scrap_price: float) -> Tuple[float, float]:
-    """Calculate profit for a given purchase quantity using the simulated demand
-    
-    Args:
-        df_simulated: DataFrame with simulated demand data
-        test_qty: Quantity to test
-        cost_price: Cost per paper
-        selling_price: Selling price per paper
-        scrap_price: Salvage price per paper
-        
-    Returns:
-        Tuple of (average_profit, total_profit)
-    """
+# *** CORRECTED *** Optimization profit calculation
+def calculate_profit_for_quantity(df_simulated, test_qty, cost_price, selling_price, scrap_price):
+    """Calculate profit for a given purchase quantity using the simulated demand"""
     profits = []
     # Use the simulated demands to test a new purchase quantity
     for demand in df_simulated['Demand']:
@@ -479,17 +407,11 @@ def calculate_profit_for_quantity(df_simulated: pd.DataFrame, test_qty: int,
         salvage = papers_unsold * scrap_price
         lost_profit = excess_demand * (selling_price - cost_price)
         
-        # PROFIT FORMULA: Revenue - Cost - Lost Profit + Salvage
+        # *** CORRECTED PROFIT FORMULA ***
         daily_profit = revenue - cost - lost_profit + salvage
         profits.append(daily_profit)
     
-    # Guard against empty profits list and ensure native Python floats for type compatibility
-    if not profits:
-        return 0.0, 0.0
-
-    avg_profit = float(np.mean(profits))
-    total_profit = float(sum(profits))
-    return avg_profit, total_profit
+    return np.mean(profits), sum(profits)
 
 
 # --- Main App ---
@@ -502,23 +424,23 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("Day Type Probabilities")
     day_type_df = create_cumulative_prob_table(prob_good, prob_fair, prob_poor)
-    st.dataframe(day_type_df, width='stretch')
+    st.dataframe(day_type_df, use_container_width=True)
 
 with col2:
     st.subheader("Demand Probabilities (Good Day)")
     good_demand_df = create_demand_prob_table(good_day_min, good_day_max, bundle_size)
-    st.dataframe(good_demand_df, width='stretch')
+    st.dataframe(good_demand_df, use_container_width=True)
 
 col3, col4 = st.columns(2)
 with col3:
     st.subheader("Demand Probabilities (Fair Day)")
     fair_demand_df = create_demand_prob_table(fair_day_min, fair_day_max, bundle_size)
-    st.dataframe(fair_demand_df, width='stretch')
+    st.dataframe(fair_demand_df, use_container_width=True)
 
 with col4:
     st.subheader("Demand Probabilities (Poor Day)")
     poor_demand_df = create_demand_prob_table(poor_day_min, poor_day_max, bundle_size)
-    st.dataframe(poor_demand_df, width='stretch')
+    st.dataframe(poor_demand_df, use_container_width=True)
 
 
 # Run simulation
@@ -609,8 +531,8 @@ if run_simulation:
             metric_avg_lost_profit.metric("💸 Avg Lost Profit", f"₹{avg_lost_profit:.2f}")
             metric_avg_demand.metric("📈 Avg Demand", f"{avg_demand:.0f} papers")
             
-            # Update charts every 5 days or on last day for smoother performance without glitching
-            if current_day % 5 == 0 or current_day == num_days:
+            # Update charts every 3 days or on last day for smoother updates
+            if current_day % 3 == 0 or current_day == num_days:
                 # Daily profit chart
                 fig_profit = go.Figure()
                 fig_profit.add_trace(go.Scatter(
@@ -632,9 +554,9 @@ if run_simulation:
                     yaxis_title="Profit (₹)",
                     height=350,
                     hovermode='x unified',
-                    transition_duration=500
+                    transition={'duration': 500, 'easing': 'cubic-in-out'}
                 )
-                profit_chart_placeholder.plotly_chart(fig_profit, width='stretch')
+                profit_chart_placeholder.plotly_chart(fig_profit, use_container_width=True)
                 
                 # Demand vs Papers Bought
                 fig_demand = go.Figure()
@@ -662,9 +584,9 @@ if run_simulation:
                     yaxis_title="Newspapers",
                     height=350,
                     hovermode='x unified',
-                    transition_duration=500
+                    transition={'duration': 500, 'easing': 'cubic-in-out'}
                 )
-                demand_chart_placeholder.plotly_chart(fig_demand, width='stretch')
+                demand_chart_placeholder.plotly_chart(fig_demand, use_container_width=True)
                 
                 # Day type distribution
                 day_type_counts = df['Type of Day'].value_counts()
@@ -679,9 +601,9 @@ if run_simulation:
                 fig_day_type.update_layout(
                     title="📅 Observed Distribution of Day Types",
                     height=350,
-                    transition_duration=500
+                    transition={'duration': 500, 'easing': 'cubic-in-out'}
                 )
-                day_type_chart_placeholder.plotly_chart(fig_day_type, width='stretch')
+                day_type_chart_placeholder.plotly_chart(fig_day_type, use_container_width=True)
                 
                 # Cumulative profit
                 df['Cumulative Profit'] = df['Daily Profit'].cumsum()
@@ -701,9 +623,9 @@ if run_simulation:
                     yaxis_title="Cumulative Profit (₹)",
                     height=350,
                     hovermode='x unified',
-                    transition_duration=500
+                    transition={'duration': 500, 'easing': 'cubic-in-out'}
                 )
-                cumulative_chart_placeholder.plotly_chart(fig_cumulative, width='stretch')
+                cumulative_chart_placeholder.plotly_chart(fig_cumulative, use_container_width=True)
             
             # Update table
             display_df = df[['Day', 'Random Digit (Day)', 'Type of Day', 'Random Digit (Demand)',
@@ -712,7 +634,7 @@ if run_simulation:
             
             table_placeholder.dataframe(
                 display_df,
-                width='stretch'
+                use_container_width=True
             )
         
         # Simulation speed
@@ -764,7 +686,7 @@ if run_simulation:
     
     # Complete simulation table
     st.subheader("📋 Complete Simulation Table")
-    st.dataframe(df, width='stretch', height=400)
+    st.dataframe(df, use_container_width=True, height=400)
     
     # Download button
     csv = df.to_csv(index=False)
@@ -783,9 +705,9 @@ if run_simulation:
     
     # Test different quantities
     optimization_results = []
-    # Test a reasonable range: slightly below min demand to above max demand
-    min_test = max(bundle_size, int(df['Demand'].min() * 0.8))
-    max_test = int(df['Demand'].max() * 1.2) + bundle_size * 2
+    # Test a reasonable range around the average demand and current quantity
+    min_test = bundle_size
+    max_test = max(df['Demand'].max() + bundle_size * 3, num_papers * 2)
     test_quantities = range(min_test, max_test, bundle_size)
     
     progress_opt = st.progress(0, text="Analyzing optimal purchase quantity...")
@@ -811,23 +733,17 @@ if run_simulation:
     if opt_df.empty:
         st.error("Optimization failed. No test quantities were valid.")
     else:
-        optimal_row = opt_df.loc[opt_df['Average Daily Profit'].idxmax()]
-        optimal_qty = optimal_row['Papers Purchased']
-        # Ensure optimal_qty is a scalar
-        if hasattr(optimal_qty, "item"):
-            optimal_qty_scalar = optimal_qty.item()
-        elif hasattr(optimal_qty, "iloc"):
-            optimal_qty_scalar = optimal_qty.iloc[0]
-        else:
-            optimal_qty_scalar = int(optimal_qty)
-        optimal_profit = optimal_row['Average Daily Profit']
+        optimal_idx = int(opt_df['Average Daily Profit'].idxmax())
+        # Ensure concrete Python types using .at for scalar access
+        optimal_qty = int(float(opt_df.at[optimal_idx, 'Papers Purchased']))  # type: ignore
+        optimal_profit = float(opt_df.at[optimal_idx, 'Average Daily Profit'])  # type: ignore
         
         # Display optimal quantity
         col1, col2 = st.columns([1, 2])
         
         with col1:
             st.success(f"### 🏆 Optimal Quantity Found!")
-            st.metric("📦 Optimal Papers to Purchase", f"{int(optimal_qty_scalar)} papers")
+            st.metric("📦 Optimal Papers to Purchase", f"{optimal_qty} papers")
             st.metric("💰 Expected Daily Profit", f"₹{optimal_profit:.2f}")
             
             # Find the profit for the user's *current* selection
@@ -835,24 +751,14 @@ if run_simulation:
             if not current_selection_profit.empty:
                 current_profit = current_selection_profit.iloc[0]
                 improvement = optimal_profit - current_profit
-                
-                # Show positive/negative delta with appropriate color
-                if improvement < 0:
-                    st.metric("📈 Profit Improvement", f"₹{abs(improvement):.2f}/day", 
-                              delta=f"{(improvement/current_profit)*100:.1f}%" if current_profit > 0 else None,
-                              delta_color="inverse")  # Red arrow for negative
-                    st.metric("📅 Annual Impact", f"₹{abs(improvement * 365):,.2f}/year",
-                              delta_color="inverse")
-                else:
-                    st.metric("📈 Profit Improvement", f"₹{improvement:.2f}/day", 
-                              delta=f"{(improvement/current_profit)*100:.1f}%" if current_profit > 0 else None)
-                    st.metric("📅 Annual Improvement", f"₹{improvement * 365:,.2f}/year")
+                st.metric("📈 Profit Improvement", f"₹{improvement:.2f}/day", 
+                          delta=f"{(improvement/current_profit)*100:.1f}%" if current_profit > 0 else None)
+                st.metric("📅 Annual Improvement", f"₹{improvement * 365:,.2f}/year")
             
-            # Use optimal_qty_scalar for comparison and display
-            if int(optimal_qty_scalar) == num_papers:
-                 st.info(f"✅ Your current selection of {num_papers} papers is already the optimal quantity!")
+            if optimal_qty == num_papers:
+                st.info(f"✅ Your current selection of {num_papers} papers is already the optimal quantity!")
             else:
-                st.success(f"✅ Switching from {num_papers} to {int(optimal_qty_scalar)} papers could increase profit!")
+                st.success(f"✅ Switching from {num_papers} to {optimal_qty} papers could increase profit!")
 
         
         with col2:
@@ -866,8 +772,8 @@ if run_simulation:
                 line=dict(color='#636EFA', width=3)
             ))
             # Highlight Optimal
-            fig_opt.add_vline(x=int(optimal_qty_scalar), line_dash="dash", line_color="#00CC96",
-                              annotation_text=f"Optimal: {int(optimal_qty_scalar)}", 
+            fig_opt.add_vline(x=optimal_qty, line_dash="dash", line_color="#00CC96",
+                              annotation_text=f"Optimal: {optimal_qty}", 
                               annotation_position="top left", line_width=2)
             # Highlight Current
             fig_opt.add_vline(x=num_papers, line_dash="dash", line_color="#EF553B",
@@ -880,14 +786,14 @@ if run_simulation:
                 yaxis_title="Average Daily Profit (₹)",
                 height=450,
                 hovermode='x unified',
-                transition_duration=500
+                transition={'duration': 500, 'easing': 'cubic-in-out'}
             )
-            st.plotly_chart(fig_opt, width='stretch')
+            st.plotly_chart(fig_opt, use_container_width=True)
         
         # Optimization table
         st.subheader("📊 Optimization Results Table")
         st.dataframe(opt_df.style.highlight_max(subset=['Average Daily Profit'], color='#00CC96', axis=0), 
-                     width='stretch')
+                     use_container_width=True)
 
 else:
     st.info("👈 Configure the parameters in the sidebar and click '🚀 Run Simulation' to start!")

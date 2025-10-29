@@ -57,14 +57,14 @@ A newsstand owner faces the classic **inventory optimization problem**: determin
 - **Bundle Parameters**: Bundle size and number of papers to purchase daily
 - **Day Type Probabilities**: Probability distribution for Good, Fair, and Poor days (auto-adjusting)
 - **Demand Distribution**: Min/max demand ranges for each day type
-- **Simulation Settings**: Number of days (1-365) and animation speed (0.5-1.0 seconds)
+- **Simulation Settings**: Number of days (1-365) and animation speed (0.0-1.0 seconds)
 
 ### Real-Time Visualizations
 1. **Daily Profit Chart**: Track profit trends over time with average line
 2. **Demand vs Papers Bought**: Compare actual demand against inventory
 3. **Day Type Distribution**: Pie chart showing observed distribution of day types
 4. **Cumulative Profit**: Running total of profits over the simulation period
-5. **Smooth Animations**: Charts update every 5 days with 500ms transitions for flicker-free viewing
+5. **Smooth Animations**: Charts update every 3 days with 500ms transitions for flicker-free viewing
 
 ### Comprehensive Analytics
 - Random digit generation for day types and demand
@@ -156,12 +156,8 @@ The application will automatically open at `http://localhost:8501`
 
 #### Simulation Settings
 - **Number of Days**: 1 to 365 days (default: 365)
-- **Simulation Speed**: 0.5 to 1.0 seconds per day (default: 0.8)
+- **Simulation Speed**: 0.0 to 1.0 seconds per day (default: 0.01)
 Click the "🚀 Run Simulation" button in the sidebar to start
-
-#### Simulation Settings
-- **Number of Days**: 1 to 365 days (default: 365)
-- **Simulation Speed**: 0.5 to 1.0 seconds per day (default: 0.8)
 
 ### Step 2: Run Simulation
 Click the "🚀 Run Simulation" button in the sidebar to start the discrete-event simulation.
@@ -174,7 +170,7 @@ The simulation displays live updates including:
   - Average Daily Profit (₹)
   - Average Lost Profit (₹)
   - Average Demand (papers)
-- **Real-time Charts**: Updated every 5 days for smooth performance
+- **Real-time Charts**: Updated every 3 days for smooth performance
 - **Live Data Table**: Last 20 days of simulation results
 
 ### Step 4: Analyze Results
@@ -186,7 +182,7 @@ After completion, review:
 
 ---
 
-## � Simulation Methodology
+## 🧪 Simulation Methodology
 
 ### Overview
 This application implements a **Monte Carlo simulation** within a **Discrete-Event (SimPy)** framework to model the stochastic nature of newspaper demand and day types.
@@ -433,7 +429,7 @@ Range width per demand ≈ 100 / n digits
 
 ## 🎯 Optimization Analysis
 
-## � Optimization Analysis
+## 🎯 Optimization Analysis
 
 ### Methodology
 The optimization engine performs **post-simulation analysis** to find the purchase quantity that would have yielded maximum profit given the observed demand patterns.
@@ -514,7 +510,7 @@ The optimization engine performs **post-simulation analysis** to find the purcha
 | Event Scheduling | SimPy process-based |
 | Data Structure | Pandas DataFrame |
 | Visualization | Plotly (interactive) |
-| Update Frequency | Every 5 days |
+| Update Frequency | Every 3 days |
 | Transition Duration | 500ms (smooth) |
 
 ### Performance Considerations
@@ -567,7 +563,7 @@ The optimization engine performs **post-simulation analysis** to find the purcha
 
 ---
 
-## � Best Practices & Tips
+## 💡 Best Practices & Tips
 
 ### Parameter Configuration
 1. **Realistic Probabilities**: Ensure day type probabilities sum to 1.0 (auto-adjusted)
@@ -602,7 +598,7 @@ The optimization engine performs **post-simulation analysis** to find the purcha
 - Increase the simulation speed slider to 0
 
 ### Charts not updating
-- This is normal - charts update every 5 days to improve performance
+- This is normal - charts update every 3 days to improve performance
 - They will update at the end of the simulation
 
 ---
@@ -625,12 +621,12 @@ The optimization engine performs **post-simulation analysis** to find the purcha
 1. Reduce number of simulation days (try 100-200 initially)
 2. Increase simulation speed to 0.5 seconds
 3. Close other browser tabs
-4. Charts update every 5 days (this is intentional for performance)
+4. Charts update every 3 days (this is intentional for performance)
 
 #### Charts Not Updating
 **Symptoms**: Visualizations appear frozen
 **Solutions**:
-- This is normal behavior - charts update every 5 days
+- This is normal behavior - charts update every 3 days
 - Charts will update at simulation completion
 - Final results show all data
 
@@ -780,8 +776,4 @@ For questions or issues, please open an issue in the repository.
 ---
 
 **Happy Simulating! 📊📰**
-#   c s m - i a 2 
- 
- #   c s m - i a 2 
- 
- 
+
