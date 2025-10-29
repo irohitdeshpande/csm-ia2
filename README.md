@@ -81,7 +81,7 @@ pip install -r requirements.txt
 
 4. **Run the application:**
 ```bash
-streamlit run newsstand_simulation.py
+streamlit run app.py
 ```
 
 5. **Open your browser:**
@@ -237,6 +237,8 @@ For questions or issues, please open an issue in the repository.
 ---
 
 **Happy Simulating! 📊📰**
-#   c s m - i a 2  
- #   c s m - i a 2  
+#   c s m - i a 2 
+ 
+ #   c s m - i a 2 
+ 
  
