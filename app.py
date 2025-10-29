@@ -44,71 +44,53 @@ num_papers = st.sidebar.slider("Number of Papers to Purchase Daily",
 # Day type probabilities
 st.sidebar.subheader("📅 Day Type Probabilities")
 
-# --- Auto-adjusting probability sliders using session state ---
-if 'prob_anchor' not in st.session_state:
-    st.session_state['prob_anchor'] = []  # keep last two changed identifiers
+# --- Strict auto-adjust: the most recently changed slider is set so that sum == 1.00 ---
 if 'prob_adjust_lock' not in st.session_state:
     st.session_state['prob_adjust_lock'] = False
 
-def _prob_changed(which: str):
-    """Track last two sliders changed; when two are set, adjust the third to keep sum≈1.0."""
+def _adjust_current(which: str):
+    """Strict mode: set the currently changed slider so Good+Fair+Poor = 1.00 exactly."""
     if st.session_state.get('prob_adjust_lock'):
         return
-    anchor = list(st.session_state.get('prob_anchor', []))
-    if which in anchor:
-        anchor.remove(which)
-    anchor.append(which)
-    # keep only last two
-    anchor = anchor[-2:]
-    st.session_state['prob_anchor'] = anchor
+    g = float(st.session_state.get('prob_good_slider', 0.35))
+    f = float(st.session_state.get('prob_fair_slider', 0.45))
+    p = float(st.session_state.get('prob_poor_slider', 0.20))
 
-    if len(anchor) == 2:
-        g = float(st.session_state.get('prob_good_slider', 0.35))
-        f = float(st.session_state.get('prob_fair_slider', 0.45))
-        p = float(st.session_state.get('prob_poor_slider', 0.20))
-
-        missing = {'good', 'fair', 'poor'} - set(anchor)
-        if missing:
-            missing = missing.pop()
-            if missing == 'good':
-                target = max(0.0, min(1.0, 1.0 - f - p))
-                st.session_state['prob_adjust_lock'] = True
-                st.session_state['prob_good_slider'] = round(target, 2)
-                st.session_state['prob_adjust_lock'] = False
-            elif missing == 'fair':
-                target = max(0.0, min(1.0, 1.0 - g - p))
-                st.session_state['prob_adjust_lock'] = True
-                st.session_state['prob_fair_slider'] = round(target, 2)
-                st.session_state['prob_adjust_lock'] = False
-            else:  # missing == 'poor'
-                target = max(0.0, min(1.0, 1.0 - g - f))
-                st.session_state['prob_adjust_lock'] = True
-                st.session_state['prob_poor_slider'] = round(target, 2)
-                st.session_state['prob_adjust_lock'] = False
-            st.rerun()
+    st.session_state['prob_adjust_lock'] = True
+    try:
+        if which == 'good':
+            target = 1.0 - f - p
+            st.session_state['prob_good_slider'] = round(max(0.0, min(1.0, target)), 2)
+        elif which == 'fair':
+            target = 1.0 - g - p
+            st.session_state['prob_fair_slider'] = round(max(0.0, min(1.0, target)), 2)
+        else:  # 'poor'
+            target = 1.0 - g - f
+            st.session_state['prob_poor_slider'] = round(max(0.0, min(1.0, target)), 2)
+    finally:
+        st.session_state['prob_adjust_lock'] = False
+    st.rerun()
 
 def _on_good():
-    _prob_changed('good')
+    _adjust_current('good')
 
 def _on_fair():
-    _prob_changed('fair')
+    _adjust_current('fair')
 
 def _on_poor():
-    _prob_changed('poor')
+    _adjust_current('poor')
 
 # Sliders with callbacks
 prob_good = st.sidebar.slider("Probability of Good Day", min_value=0.0, max_value=1.0, value=0.35, step=0.01, key="prob_good_slider", on_change=_on_good)
 prob_fair = st.sidebar.slider("Probability of Fair Day", min_value=0.0, max_value=1.0, value=0.45, step=0.01, key="prob_fair_slider", on_change=_on_fair)
 prob_poor = st.sidebar.slider("Probability of Poor Day", min_value=0.0, max_value=1.0, value=0.20, step=0.01, key="prob_poor_slider", on_change=_on_poor)
 
-# Display status about sum (no normalization side-effects)
+# Display status about sum (strict mode keeps it at 1.00)
 total_prob = prob_good + prob_fair + prob_poor
-if np.isclose(total_prob, 1.0, atol=0.01):
-    st.sidebar.info(f"Probabilities ≈ 1.0. Good={prob_good:.2f}, Fair={prob_fair:.2f}, Poor={prob_poor:.2f}")
-elif total_prob == 0:
-    st.sidebar.error("Total probability must be greater than 0!")
+if not np.isclose(total_prob, 1.0, atol=0.001):
+    st.sidebar.warning(f"Current sum = {total_prob:.2f}. The last changed slider will be adjusted to enforce 1.00.")
 else:
-    st.sidebar.warning(f"Current sum = {total_prob:.2f}. Adjust any two sliders; the third will auto-update.")
+    st.sidebar.info(f"Probabilities = 1.00 (Good={prob_good:.2f}, Fair={prob_fair:.2f}, Poor={prob_poor:.2f})")
 
 
 # Demand distribution parameters
